@@ -1,96 +1,96 @@
 import telebot
 import json
 from openai import OpenAI
-from telebot import types # Импортируем модуль для создания кнопок
+from telebot import types # Import module for inline buttons
 
-TELEGRAM_TOKEN = "Твой токен от BotFather" # Твой токен от BotFather
+TELEGRAM_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN" # Replace with your actual token from BotFather
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 client = OpenAI()
 
-# Будем временно хранить последний запрос пользователя, чтобы кнопки знали контекст
+# Temporary storage to keep track of user property descriptions across callbacks
 user_requests = {}
 
-print("🤖 Обновленный Telegram-бот с кнопками успешно запущен...")
+print("🤖 Updated Telegram Bot with inline buttons is running...")
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     welcome_text = (
-        "Привет! Я твой ИИ-Ассистент по безопасности жилых домов в Орландо. 🛡️🏠\n\n"
-        "Отправь мне описание дома или проблему жильца, и я помогу тебе закрыть сделку."
+        "Hello! I am your AI Residential Security Assistant for Orlando. 🛡️🏠\n\n"
+        "Send me a property description or a homeowner's security concern, and I will help you close the deal."
     )
     bot.reply_to(message, welcome_text)
 
-# Перехватываем описание объекта
+# Intercept property descriptions
 @bot.message_handler(func=lambda message: True)
 def handle_object_description(message):
     chat_id = message.chat.id
-    user_requests[chat_id] = message.text # Сохраняем текст запроса
+    user_requests[chat_id] = message.text # Save message text to maintain context
     
-    bot.reply_to(message, "⏳ Секунду, анализирую уязвимости объекта...")
+    bot.reply_to(message, "⏳ One moment, analyzing property vulnerabilities...")
     
     try:
-        # Первым шагом ИИ делает только быстрый анализ рисков на русском
+        # Step 1: Rapid risk analysis in English
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "Ты — эксперт по безопасности Residential объектов. Кратко перечисли главные риски и уязвимости дома на основе описания пользователя на русском языке. Будь лаконичен."},
+                {"role": "system", "content": "You are a residential security expert. Briefly list the main risks and vulnerabilities of the home based on the user's description in English. Be concise and professional."},
                 {"role": "user", "content": message.text}
             ]
         )
         
         risks_analysis = response.choices[0].message.content
         
-        # Создаем интерактивную клавиатуру под сообщением
+        # Create interactive inline keyboard
         markup = types.InlineKeyboardMarkup(row_width=1)
         
-        btn_email = types.InlineKeyboardButton("📧 Сгенерировать Pitch Email", callback_data="get_email")
-        btn_nextdoor = types.InlineKeyboardButton("💬 Текст для соседского чата (Nextdoor)", callback_data="get_nextdoor")
-        btn_tech = types.InlineKeyboardButton("🛠️ Рекомендация по камерам", callback_data="get_tech")
+        btn_email = types.InlineKeyboardButton("📧 Generate Pitch Email", callback_data="get_email")
+        btn_nextdoor = types.InlineKeyboardButton("💬 Nextdoor / Facebook Post", callback_data="get_nextdoor")
+        btn_tech = types.InlineKeyboardButton("🛠️ Hardware Recommendations", callback_data="get_tech")
         
         markup.add(btn_email, btn_nextdoor, btn_tech)
         
-        # Отправляем риски вместе с кнопками
-        bot.send_message(chat_id, f"🚨 *Анализ уязвимостей:*\n\n{risks_analysis}\n\n*Что нужно сгенерировать для этого объекта?*", parse_mode="Markdown", reply_markup=markup)
+        # Send risks overview accompanied by choice buttons
+        bot.send_message(chat_id, f"🚨 *Vulnerability Analysis:*\n\n{risks_analysis}\n\n*What would you like to generate for this property?*", parse_mode="Markdown", reply_markup=markup)
         
     except Exception as e:
-        bot.reply_to(message, f"Ошибка: {e}")
+        bot.reply_to(message, f"Error: {e}")
 
-# Обработчик нажатия на кнопки (Callback)
+# Handle inline button clicks
 @bot.callback_query_handler(func=lambda call: True)
 def callback_inline(call):
     chat_id = call.message.chat.id
     
-    # Проверяем, есть ли у нас сохраненный текст объекта для этого чата
+    # Verify session context exists
     if chat_id not in user_requests:
-        bot.send_message(chat_id, "Извини, сессия устарела. Отправь описание объекта заново.")
+        bot.send_message(chat_id, "Sorry, your session has expired. Please send the property description again.")
         return
 
     original_text = user_requests[chat_id]
     
-    # Уведомляем Telegram, что нажатие обработано (чтобы кнопка не «зависала»)
-    bot.answer_callback_query(call.id, "ИИ создает контент...")
+    # Acknowledge the callback immediately to stop the button loading animation
+    bot.answer_callback_query(call.id, "AI is processing your request...")
 
     if call.data == "get_email":
-        prompt = "Напиши профессиональное холодное письмо (Pitch Email) владельцу дома строго на английском языке. Предложи аудит безопасности."
+        prompt = "Write a professional cold pitch email to the homeowner in English. Focus on the identified risks and offer a free security audit."
     elif call.data == "get_nextdoor":
-        prompt = "Напиши дружелюбный, неформальный ответ для американской соседской соцсети Nextdoor / Facebook на английском языке. Тон должен быть помогающим, соседским, экспертным, без прямой агрессивной продажи."
+        prompt = "Write a friendly, informal response for a US neighborhood platform like Nextdoor or Facebook in English. The tone must be helpful, neighborly, and expert, without an aggressive, direct sales pitch."
     elif call.data == "get_tech":
-        prompt = "Составь список рекомендаций по оборудованию на русском языке (какие камеры лучше поставить: купольные, цилиндрические, сколько штук примерно, нужны ли датчики движения или прожекторы на бэкъярд)."
+        prompt = "Create a structured hardware recommendation list in English. Specify types of cameras (dome, bullet), estimated quantities, and whether motion-activated floodlights or backyard sensors are recommended."
 
-    # Запрашиваем у OpenAI нужный формат по кнопке
+    # Request targeted content format from OpenAI based on selected button
     try:
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": f"Ты — ИИ-консультант по системам видеонаблюдения. Основываясь на описании объекта, выполни задачу: {prompt}"},
+                {"role": "system", "content": f"You are an AI consultant specialized in CCTV systems. Based on the property details provided, execute this exact task: {prompt}"},
                 {"role": "user", "content": original_text}
             ]
         )
         
         result_text = response.choices[0].message.content
-        bot.send_message(chat_id, result_text, parse_mode="Markdown" if call.data != "get_tech" else None)
+        bot.send_message(chat_id, result_text, parse_mode="Markdown")
         
     except Exception as e:
-        bot.send_message(chat_id, f"Ошибка при генерации: {e}")
+        bot.send_message(chat_id, f"Generation failed: {e}")
 
 bot.infinity_polling()
