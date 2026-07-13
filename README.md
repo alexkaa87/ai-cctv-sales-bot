@@ -25,4 +25,4 @@ An interactive Telegram bot built with **Python** and **OpenAI API (GPT-4o-mini)
 
 1. Clone the repository:
    ```bash
-   git clone [https://github.com/alexkaa87/ai-cctv-sales-bot.git](https://github.com/alexkaa87/ai-cctv-sales-bot.git)
+ git clone https://github.com/alexkaa87/ai-cctv-sales-bot.git
