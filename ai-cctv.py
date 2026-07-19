@@ -1,84 +1,124 @@
 import telebot
-import json
+import sqlite3
 from openai import OpenAI
-from telebot import types # Import module for inline buttons
+from telebot import types
 
-TELEGRAM_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN" # Replace with your actual token from BotFather
+# === CONFIGURATION ===
+TELEGRAM_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"  # Replace with your actual token from BotFather
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 client = OpenAI()
 
-# Temporary storage to keep track of user property descriptions across callbacks
-user_requests = {}
+# === DATABASE INITIALIZATION ===
+def init_db():
+    conn = sqlite3.connect('bot_database.db')
+    cursor = conn.cursor()
+    # Create user sessions table if it doesn't exist
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS user_requests (
+            chat_id INTEGER PRIMARY KEY,
+            property_text TEXT
+        )
+    ''')
+    conn.commit()
+    conn.close()
 
-print("🤖 Updated Telegram Bot with inline buttons is running...")
+# Initialize the database file on script startup
+init_db()
+
+# Helper function to save/update user property details
+def save_user_property(chat_id, text):
+    conn = sqlite3.connect('bot_database.db')
+    cursor = conn.cursor()
+    # INSERT OR REPLACE updates the entry if the chat_id already exists
+    cursor.execute('''
+        INSERT OR REPLACE INTO user_requests (chat_id, property_text)
+        VALUES (?, ?)
+    ''', (chat_id, text))
+    conn.commit()
+    conn.close()
+
+# Helper function to fetch saved property details
+def get_user_property(chat_id):
+    conn = sqlite3.connect('bot_database.db')
+    cursor = conn.cursor()
+    cursor.execute('SELECT property_text FROM user_requests WHERE chat_id = ?', (chat_id,))
+    result = cursor.fetchone()
+    conn.close()
+    return result[0] if result else None
+
+# =================================
+
+print("Database-powered Telegram Bot is running smoothly...")
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     welcome_text = (
-        "Hello! I am your AI Residential Security Assistant for Orlando. 🛡️🏠\n\n"
+        "Hello! I am your AI Residential Security Assistant for Orlando.\n\n"
         "Send me a property description or a homeowner's security concern, and I will help you close the deal."
     )
     bot.reply_to(message, welcome_text)
 
-# Intercept property descriptions
+# Handle income property description
 @bot.message_handler(func=lambda message: True)
 def handle_object_description(message):
     chat_id = message.chat.id
-    user_requests[chat_id] = message.text # Save message text to maintain context
     
-    bot.reply_to(message, "⏳ One moment, analyzing property vulnerabilities...")
+    # Save the input to SQLite database to persist state across reboots
+    save_user_property(chat_id, message.text)
+    
+    bot.reply_to(message, "One moment, analyzing property vulnerabilities...")
     
     try:
-        # Step 1: Rapid risk analysis in English
+        # Prompting OpenAI for rapid risk analysis
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "You are a residential security expert. Briefly list the main risks and vulnerabilities of the home based on the user's description in English. Be concise and professional."},
+                {"role": "system", "content": "You are a residential security expert. Briefly list the main risks and vulnerabilities of the home based on the user's description in English. Be concise and professional. Do not use any emojis in your response."},
                 {"role": "user", "content": message.text}
             ]
         )
-        
         risks_analysis = response.choices[0].message.content
         
-        # Create interactive inline keyboard
+        # Setting up interactive choice buttons
         markup = types.InlineKeyboardMarkup(row_width=1)
-        
-        btn_email = types.InlineKeyboardButton("📧 Generate Pitch Email", callback_data="get_email")
-        btn_nextdoor = types.InlineKeyboardButton("💬 Nextdoor / Facebook Post", callback_data="get_nextdoor")
-        btn_tech = types.InlineKeyboardButton("🛠️ Hardware Recommendations", callback_data="get_tech")
-        
+        btn_email = types.InlineKeyboardButton("Generate Pitch Email", callback_data="get_email")
+        btn_nextdoor = types.InlineKeyboardButton("Nextdoor / Facebook Post", callback_data="get_nextdoor")
+        btn_tech = types.InlineKeyboardButton("Hardware Recommendations", callback_data="get_tech")
         markup.add(btn_email, btn_nextdoor, btn_tech)
         
-        # Send risks overview accompanied by choice buttons
-        bot.send_message(chat_id, f"🚨 *Vulnerability Analysis:*\n\n{risks_analysis}\n\n*What would you like to generate for this property?*", parse_mode="Markdown", reply_markup=markup)
+        bot.send_message(chat_id, f"*Vulnerability Analysis:*\n\n{risks_analysis}\n\n*What would you like to generate for this property?*", parse_mode="Markdown", reply_markup=markup)
         
     except Exception as e:
-        bot.reply_to(message, f"Error: {e}")
+        bot.reply_to(message, f"Error occurred: {e}")
 
-# Handle inline button clicks
+# Process interactive button actions
 @bot.callback_query_handler(func=lambda call: True)
 def callback_inline(call):
     chat_id = call.message.chat.id
     
-    # Verify session context exists
-    if chat_id not in user_requests:
-        bot.send_message(chat_id, "Sorry, your session has expired. Please send the property description again.")
+    # Retrieve data context from SQLite database
+    original_text = get_user_property(chat_id)
+    
+    if not original_text:
+        bot.send_message(chat_id, "Sorry, your session has expired or data was missing. Please resend the property description.")
         return
 
-    original_text = user_requests[chat_id]
-    
-    # Acknowledge the callback immediately to stop the button loading animation
-    bot.answer_callback_query(call.id, "AI is processing your request...")
+    # Instantly answer the callback to clear the button loading state
+    try:
+        bot.answer_callback_query(call.id, "AI is processing your request...")
+    except Exception:
+        # Pass if the query expired due to Telegram timeouts
+        pass
 
     if call.data == "get_email":
-        prompt = "Write a professional cold pitch email to the homeowner in English. Focus on the identified risks and offer a free security audit."
+        prompt = "Write a professional cold pitch email to the homeowner in English. Focus on the identified risks and offer a free security audit. Do not use emojis."
     elif call.data == "get_nextdoor":
-        prompt = "Write a friendly, informal response for a US neighborhood platform like Nextdoor or Facebook in English. The tone must be helpful, neighborly, and expert, without an aggressive, direct sales pitch."
+        prompt = "Write a friendly, informal response for a US neighborhood platform like Nextdoor or Facebook in English. The tone must be helpful, neighborly, and expert, without an aggressive, direct sales pitch. Do not use emojis."
     elif call.data == "get_tech":
-        prompt = "Create a structured hardware recommendation list in English. Specify types of cameras (dome, bullet), estimated quantities, and whether motion-activated floodlights or backyard sensors are recommended."
+        prompt = "Create a structured hardware recommendation list in English. Specify types of cameras (dome, bullet), estimated quantities, and whether motion-activated floodlights or backyard sensors are recommended. Do not use emojis."
 
-    # Request targeted content format from OpenAI based on selected button
     try:
+        # Request tailored response from OpenAI
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
@@ -86,7 +126,6 @@ def callback_inline(call):
                 {"role": "user", "content": original_text}
             ]
         )
-        
         result_text = response.choices[0].message.content
         bot.send_message(chat_id, result_text, parse_mode="Markdown")
         
