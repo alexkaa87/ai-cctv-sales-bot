@@ -21,7 +21,7 @@ A production-ready Telegram bot designed for CCTV and residential security integ
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/YOUR_GITHUB_USERNAME/ai-cctv-sales-bot.git
+   git clone https://github.com/alexkaa87/ai-cctv-sales-bot.git
    cd ai-cctv-sales-bot
    ```
 
